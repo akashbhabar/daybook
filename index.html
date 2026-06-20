@@ -528,6 +528,32 @@ pre.code{background:#1a1e27;color:#e6ebf2;padding:12px;border-radius:11px;font-s
 .syncpill.syncing .d{background:var(--amber);animation:pulse2 1s infinite}
 @keyframes pulse2{50%{opacity:.3}}
 
+/* ---------- First-run guided tour ---------- */
+.tourwrap{position:fixed;inset:0;z-index:120;display:none;align-items:flex-end;justify-content:center;
+  background:rgba(15,20,32,.55);backdrop-filter:blur(3px);-webkit-backdrop-filter:blur(3px)}
+.tourwrap.open{display:flex;animation:fade .25s ease}
+.tourcard{width:100%;max-width:480px;background:var(--card);border-radius:26px 26px 0 0;
+  padding:26px 24px calc(22px + env(safe-area-inset-bottom));box-shadow:0 -12px 50px rgba(15,23,42,.28);
+  animation:tourUp .34s cubic-bezier(.2,.8,.25,1)}
+@keyframes tourUp{from{transform:translateY(40px);opacity:.4}to{transform:translateY(0);opacity:1}}
+@media (min-width:900px){.tourwrap{align-items:center}.tourcard{border-radius:26px;max-width:440px}}
+.tourcard .ttop{display:flex;align-items:center;justify-content:space-between;margin-bottom:18px}
+.tourcard .tdots{display:flex;gap:6px}
+.tourcard .tdots i{width:7px;height:7px;border-radius:50%;background:var(--line2);transition:all .25s}
+.tourcard .tdots i.on{background:var(--blue);width:20px;border-radius:5px}
+.tourcard .tskip{font-size:13.5px;font-weight:700;color:var(--muted)}
+.tourcard .tskip:active{color:var(--ink2)}
+.tourcard .ticon{width:72px;height:72px;border-radius:20px;display:grid;place-items:center;font-size:36px;
+  margin:0 auto 16px;background:var(--blue-soft);box-shadow:var(--sh2)}
+.tourcard h3{font-size:22px;font-weight:800;text-align:center;margin:0 0 8px;letter-spacing:-.01em}
+.tourcard p.tbody{font-size:15px;color:var(--ink2);text-align:center;line-height:1.55;margin:0 auto 22px;max-width:340px}
+.tourcard .tnav{display:flex;align-items:center;gap:12px}
+.tourcard .tnav .back{flex:0 0 auto;padding:14px 18px;border-radius:14px;background:var(--bg);
+  font-weight:700;font-size:15px;color:var(--ink2)}
+.tourcard .tnav .next{flex:1;padding:15px;border-radius:14px;background:var(--blue);color:#fff;
+  font-weight:700;font-size:15.5px;box-shadow:0 8px 18px rgba(47,107,255,.32)}
+.tourcard .tnav .next:active,.tourcard .tnav .back:active{transform:scale(.98)}
+
 @media (prefers-reduced-motion:reduce){*{animation:none!important;transition:none!important}}
 :focus-visible{outline:3px solid var(--blue);outline-offset:1px}
 </style>
@@ -813,6 +839,23 @@ pre.code{background:#1a1e27;color:#e6ebf2;padding:12px;border-radius:11px;font-s
     </div>
   </div>
 
+  <!-- FIRST-RUN GUIDED TOUR -->
+  <div class="tourwrap" id="tourWrap">
+    <div class="tourcard">
+      <div class="ttop">
+        <div class="tdots" id="tourDots"></div>
+        <button class="tskip" onclick="endTour()">Skip</button>
+      </div>
+      <div class="ticon" id="tourIcon">📖</div>
+      <h3 id="tourTitle">Welcome</h3>
+      <p class="tbody" id="tourBody"></p>
+      <div class="tnav">
+        <button class="back" id="tourBack" onclick="tourPrev()">Back</button>
+        <button class="next" id="tourNext" onclick="tourNext()">Next</button>
+      </div>
+    </div>
+  </div>
+
   <div id="toasts"></div>
 </div>
 
@@ -904,7 +947,11 @@ function fmtDateShort(dstr){ const d=new Date(dstr+'T00:00:00'); return d.getDat
 function relWord(dstr){ const a=new Date(dstr+'T00:00:00'),b=new Date(ymd(today)+'T00:00:00');
   const diff=Math.round((b-a)/864e5); if(diff===0)return'Today'; if(diff===1)return'Yesterday'; if(diff===-1)return'Tomorrow';
   return new Date(dstr+'T00:00:00').toLocaleDateString(undefined,{weekday:'long'}); }
-function tileBg(m){ if(!m)return'background:#e8edf4'; if(m.src)return`background-image:url('${m.src}')`; if(m.grad)return`background:${m.grad}`; return'background:#e8edf4'; }
+/* a media item may carry a local base64 `src` (just captured, not yet uploaded)
+   OR a cloud `url` (after it has synced to Supabase Storage). Always prefer
+   whichever is present so photos render both before and after cloud sync. */
+function mediaSrc(x){ return x ? (x.src || x.url || '') : ''; }
+function tileBg(m){ if(!m)return'background:#e8edf4'; const u=mediaSrc(m); if(u)return`background-image:url('${u}')`; if(m.grad)return`background:${m.grad}`; return'background:#e8edf4'; }
 function $(id){ return document.getElementById(id); }
 
 /* ===================== CLOUD (Supabase) ===================== */
@@ -974,7 +1021,7 @@ function showAuthMsg(text,kind){ const el=$('authMsg'); el.textContent=text; el.
 function resetAuthForm(){ $('authEmailStep').style.display='block'; $('authCodeStep').style.display='none';
   $('authHeading').textContent='Welcome to Daybook'; $('authSub').textContent='Sign in with your email to keep your memories and photos backed up and synced everywhere.';
   $('authMsg').className='authmsg'; $('authEmail').value=''; pendingAuthEmail=''; $('authEmail').focus(); }
-function useOfflineMode(){ store.set('daybook_v2_offline_choice','1'); $('authScreen').style.display='none'; }
+function useOfflineMode(){ store.set('daybook_v2_offline_choice','1'); $('authScreen').style.display='none'; maybeStartTour(); }
 function showAuthScreen(){ $('authScreen').style.display='flex'; resetAuthForm(); }
 
 async function signOutUser(){
@@ -988,10 +1035,11 @@ $('authCode').addEventListener('input', e=>{ e.target.value = e.target.value.rep
 
 /* ----- bootstrap: restore session, listen for auth changes ----- */
 async function initCloud(){
-  if(!sb){ $('authScreen').style.display = store.get('daybook_v2_offline_choice') ? 'none' : 'none'; return; }
+  if(!sb){ $('authScreen').style.display='none'; maybeStartTour(); return; }
   const { data:{ session } } = await sb.auth.getSession();
   if(session && session.user){ await onSignedIn(session.user); }
   else if(!store.get('daybook_v2_offline_choice')){ $('authScreen').style.display='flex'; }
+  else { maybeStartTour(); }
 
   sb.auth.onAuthStateChange(async (event, session)=>{
     if(event==='SIGNED_IN' && session && session.user){ await onSignedIn(session.user); }
@@ -1005,6 +1053,7 @@ async function onSignedIn(user){
   await migrateLocalToCloud();
   await pullCloud();
   refresh();
+  maybeStartTour();
 }
 
 /* ----- one-time migration: push any purely-local memories up on first sign-in ----- */
@@ -1105,22 +1154,47 @@ async function clearAllCloud(){
 }
 
 /* ===================== SEED ===================== */
-function seed(){
-  const d=new Date(today); const day=n=>{const x=new Date(today);x.setDate(today.getDate()-n);return ymd(x)};
-  const lastYearSame=()=>{const x=new Date(today);x.setFullYear(x.getFullYear()-1);return ymd(x)};
-  const list=[
-    {title:'Peaceful Sunset 🌅',mood:'good',time:'20:30',date:day(0),content:'Went to the lake after work. The sky was painted with orange and pink. Sat there for an hour just thinking about everything and nothing.',tags:['Peace','Evening','Nature','Relax'],location:'Kankaria Lake, Ahmedabad',rating:82,liked:true,media:[{type:'image',grad:GRADS[0]},{type:'video',grad:GRADS[2],dur:'0:18'},{type:'image',grad:GRADS[3]},{type:'image',grad:GRADS[1]},{type:'image',grad:GRADS[4]},{type:'image',grad:GRADS[5]}]},
-    {title:'Client Presentation',mood:'amazing',time:'14:15',date:day(0),content:'Nervous at start but it went really well! The team loved the new direction.',tags:['Work','Win'],rating:90,media:[{type:'image',grad:GRADS[1]}]},
-    {title:'Morning Coffee',mood:'okay',time:'11:00',date:day(0),content:'A perfect start to a productive day.',tags:['Routine','Home'],rating:60,media:[{type:'image',grad:GRADS[3]}]},
-    {title:'Lunch with friends',mood:'good',time:'13:30',date:day(1),content:'Caught up with old college friends. So many laughs.',tags:['Friends','Food'],rating:78,media:[{type:'image',grad:GRADS[4]},{type:'image',grad:GRADS[2]}]},
-    {title:'Evening walk',mood:'good',time:'18:45',date:day(2),content:'Long quiet walk to clear my head.',tags:['Self','Nature'],rating:70,media:[{type:'image',grad:GRADS[5]},{type:'image',grad:GRADS[0]},{type:'image',grad:GRADS[1]}]},
-    {title:'Watched an amazing movie at night 🍿',mood:'good',time:'21:30',date:day(3),content:'Watched an amazing movie at night, totally worth it.',tags:['Self'],rating:75,media:[]},
-    {title:'Family dinner',mood:'amazing',time:'20:00',date:day(5),content:'Everyone came over. Felt grateful.',tags:['Family','Home','Food'],rating:88,liked:true,media:[{type:'image',grad:GRADS[3]},{type:'image',grad:GRADS[4]}]},
-    {title:'Travel planning',mood:'good',time:'16:00',date:day(9),content:'Booked the trip! Counting days now.',tags:['Travel'],rating:80,media:[{type:'image',grad:GRADS[2]}]},
-    {title:'A year ago today',mood:'amazing',time:'12:00',date:lastYearSame(),content:'Look how far things have come since this day last year.',tags:['Memory','Throwback'],rating:85,media:[{type:'image',grad:GRADS[1]}]},
-  ];
-  return list.map(x=>({id:uid(),deleted:false,createdAt:nowISO(),updatedAt:nowISO(),liked:false,bookmarked:false,people:[],...x}));
+/* No sample/dummy data. A fresh install starts empty and a first-run tour
+   (see TOUR section) explains how to use the app. Returning empty here also
+   means migrateLocalToCloud() never pushes fake entries up on sign-in. */
+function seed(){ return []; }
+
+/* ===================== FIRST-RUN TOUR ===================== */
+const TOUR_KEY = 'daybook_v2_tour_done';
+const TOUR_STEPS = [
+  { icon:'📖', title:'Welcome to '+CONFIG.appName,
+    body:'Your private space to capture daily moments — a few words, a photo, a mood. Here\u2019s a quick 30-second tour.' },
+  { icon:'➕', title:'Capture a moment',
+    body:'Tap the + button anytime to add a memory. Pick a mood, write a note, and attach photos, a location, people, and tags.' },
+  { icon:'🗓️', title:'Browse your week',
+    body:'The week strip on Home lets you hop between days. The little dots under each date show the moods you logged.' },
+  { icon:'✨', title:'Relive highlights',
+    body:'Story bubbles at the top resurface your best moments — Today\u2019s memory, This Week\u2019s Best, and "On This Day" from past years.' },
+  { icon:'🧭', title:'Timeline, Calendar & Insights',
+    body:'See everything in order on the Timeline, jump around by month in the Calendar, and watch your mood trends in Insights.' },
+  { icon:'🔍', title:'Find anything fast',
+    body:'Use Search to filter memories by words, mood, tags, people, location, or whether they have photos.' },
+  { icon:'☁️', title:'Backed up & synced',
+    body:'Sign in to safely back up your memories and photos to the cloud, so they\u2019re waiting for you on every device.' },
+  { icon:'🌤️', title:'You\u2019re all set',
+    body:'That\u2019s it! Tap the + button to write your very first memory whenever you\u2019re ready.' },
+];
+let tourIndex = 0;
+
+function maybeStartTour(){ if(!store.get(TOUR_KEY)) startTour(); }
+function startTour(){ tourIndex = 0; $('tourWrap').classList.add('open'); renderTourStep(); }
+function renderTourStep(){
+  const s = TOUR_STEPS[tourIndex];
+  $('tourIcon').textContent = s.icon;
+  $('tourTitle').textContent = s.title;
+  $('tourBody').textContent = s.body;
+  $('tourDots').innerHTML = TOUR_STEPS.map((_,i)=>`<i class="${i===tourIndex?'on':''}"></i>`).join('');
+  $('tourBack').style.visibility = tourIndex===0 ? 'hidden' : 'visible';
+  $('tourNext').textContent = tourIndex===TOUR_STEPS.length-1 ? 'Start writing' : 'Next';
 }
+function tourNext(){ if(tourIndex < TOUR_STEPS.length-1){ tourIndex++; renderTourStep(); } else endTour(); }
+function tourPrev(){ if(tourIndex > 0){ tourIndex--; renderTourStep(); } }
+function endTour(){ store.set(TOUR_KEY,'1'); $('tourWrap').classList.remove('open'); }
 
 /* ===================== ROUTER ===================== */
 function go(s){
@@ -1230,7 +1304,7 @@ function renderStoriesRail(){
   rail.innerHTML = storyGroups.map((g,i)=>{
     const cover = groupCover(g);
     const seen = groupAllSeen(g);
-    const thumbStyle = cover ? (cover.src?`background-image:url('${cover.src}')`:`background:${cover.grad}`) : '';
+    const thumbStyle = cover ? (mediaSrc(cover)?`background-image:url('${mediaSrc(cover)}')`:`background:${cover.grad}`) : '';
     const inner = cover ? `<div class="thumb" style="${thumbStyle}"></div>` : `<div class="thumb empty">${g.icon}</div>`;
     return `<div class="storyitem ${seen?'seen':''}" onclick="openStoryViewer(${i})">
       <div class="ring"><div class="ringin">${inner}</div></div>
@@ -1268,7 +1342,7 @@ function renderStorySlide(){
 
   const media = m.media && m.media[0];
   const mood = moodBy(m.mood);
-  const bgStyle = media ? (media.src?`background-image:url('${media.src}')`:`background:${media.grad}`)
+  const bgStyle = media ? (mediaSrc(media)?`background-image:url('${mediaSrc(media)}')`:`background:${media.grad}`)
                          : `background:linear-gradient(160deg,${mood.color},#1a1e27 130%)`;
   const mediaCount = m.media && m.media.length>1 ? `<span style="opacity:.8">· ${m.media.length} photos</span>` : '';
 
@@ -1442,6 +1516,8 @@ function renderProfile(){
         <div class="mt"><b>Export data</b><small>Download all memories as JSON</small></div><span class="chev">›</span></div>
       <div class="mitem" onclick="renameUser()"><div class="mi" style="background:var(--purple-soft);color:var(--purple)">✏️</div>
         <div class="mt"><b>Edit name</b><small>${esc(userName)}</small></div><span class="chev">›</span></div>
+      <div class="mitem" onclick="startTour()"><div class="mi" style="background:var(--blue-soft);color:var(--blue)">🧭</div>
+        <div class="mt"><b>How to use ${CONFIG.appName}</b><small>Replay the quick guided tour</small></div><span class="chev">›</span></div>
     </div>
     <div class="menu">
       ${cloudOn ? `<div class="mitem" onclick="signOutUser()"><div class="mi" style="background:var(--bg);color:var(--ink2)">🚪</div>
@@ -1565,7 +1641,7 @@ function fileToThumb(file,cb){ const r=new FileReader(); r.onload=e=>{ const img
 /* ===================== DETAIL ===================== */
 function openDetail(id){ detailId=id; const m=memories.find(x=>x.id===id); if(!m)return;
   const mood=moodBy(m.mood); const cover=m.media&&m.media[0];
-  const heroStyle = cover ? (cover.src?`background-image:url('${cover.src}')`:`background:${cover.grad}`) : `background:linear-gradient(135deg,${mood.color},#2f6bff)`;
+  const heroStyle = cover ? (mediaSrc(cover)?`background-image:url('${mediaSrc(cover)}')`:`background:${cover.grad}`) : `background:linear-gradient(135deg,${mood.color},#2f6bff)`;
   const mediaGrid=(m.media||[]).slice(0,8).map(x=>`<div class="g" style="${tileBg(x)}">
       ${x.type==='video'?`<div class="pl"><span><svg width="13" height="13" viewBox="0 0 24 24" fill="#fff"><path d="M8 5v14l11-7z"/></svg></span></div>${x.dur?`<span class="dur">${x.dur}</span>`:''}`:''}</div>`).join('');
   const tags=(m.tags||[]).map(t=>{const c=tagColor(t);return `<span class="chip" style="background:${c.bg};color:${c.fg}">${esc(t)}</span>`}).join('');
