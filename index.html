@@ -459,6 +459,25 @@ details.howto ol{margin:0 0 10px;padding-left:18px} details.howto li{margin-bott
 pre.code{background:#1a1e27;color:#e6ebf2;padding:12px;border-radius:11px;font-size:11px;line-height:1.5;
   overflow:auto;max-height:220px;font-family:ui-monospace,Menlo,monospace;margin:8px 0 0}
 
+/* ---------- location modal ---------- */
+.loc-inner{max-width:420px}
+.loc-inner input.locname{width:100%;border:2px solid var(--line2);border-radius:13px;padding:13px 14px;
+  font-size:16px;font-weight:600;margin-bottom:12px;color:var(--ink)}
+.loc-inner input.locname:focus{outline:none;border-color:var(--blue)}
+.loc-inner .gpsbtn{display:flex;align-items:center;justify-content:center;gap:9px;width:100%;padding:13px;
+  border-radius:13px;background:var(--blue-soft);color:var(--blue);font-weight:700;font-size:14.5px;margin-bottom:12px}
+.loc-inner .gpsbtn:active{transform:scale(.98)} .loc-inner .gpsbtn:disabled{opacity:.6}
+.loc-inner .gpsbtn .spinner{width:16px;height:16px;border-radius:50%;border:2px solid rgba(47,107,255,.35);
+  border-top-color:var(--blue);animation:spin .7s linear infinite;display:inline-block}
+.locstat{display:flex;align-items:center;gap:8px;font-size:13px;font-weight:600;padding:11px 13px;
+  border-radius:12px;background:var(--bg);color:var(--ink2);margin-bottom:16px;word-break:break-word}
+.locstat.ok{background:var(--green-soft);color:var(--green)}
+.locstat.bad{background:var(--red-soft);color:var(--red)}
+.locstat b{font-weight:800}
+.loc-inner .locurllbl{display:block;font-size:12.5px;font-weight:700;color:var(--muted);margin:0 0 7px 2px}
+.loc a.loclink{color:var(--blue);font-weight:700;text-decoration:none;border-bottom:1.5px solid var(--blue-soft)}
+.loc a.loclink:active{opacity:.7}
+
 /* ---------- rename modal ---------- */
 .rename-inner{max-width:380px}
 .rename-inner .avpick{display:flex;justify-content:center;margin-bottom:18px}
@@ -820,6 +839,27 @@ pre.code{background:#1a1e27;color:#e6ebf2;padding:12px;border-radius:11px;font-s
     </div>
   </div>
 
+  <!-- LOCATION modal -->
+  <div class="sheet-modal" id="locModal">
+    <div class="sheet-inner loc-inner">
+      <h3>Add location</h3>
+      <p class="lead">Give this place a name, attach your current GPS position, or both.</p>
+      <input type="text" class="locname" id="locNameInput" maxlength="80" placeholder="Place name (optional)" autocomplete="off">
+      <button class="gpsbtn" id="locGpsBtn" onclick="captureGps()">
+        <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 21s7-6 7-11a7 7 0 1 0-14 0c0 5 7 11 7 11Z" stroke-linejoin="round"/><circle cx="12" cy="10" r="2.4"/></svg>
+        Use my current location
+      </button>
+      <div class="locstat" id="locStat">No GPS position attached yet.</div>
+      <label class="locurllbl" for="locUrlInput">Or paste a map link</label>
+      <input type="url" class="locname" id="locUrlInput" placeholder="https://maps.google.com/…" autocomplete="off" inputmode="url">
+      <div class="btnrow">
+        <button class="btn soft" onclick="closeLocModal()">Cancel</button>
+        <button class="btn" onclick="saveLocation()">Save</button>
+      </div>
+      <button class="btn soft" id="locRemoveBtn" onclick="removeLocation()" style="display:none;color:var(--red)">Remove location</button>
+    </div>
+  </div>
+
   <!-- CLEAR ALL — type-to-confirm danger modal -->
   <div class="sheet-modal" id="clearModal">
     <div class="sheet-inner danger-inner">
@@ -952,6 +992,35 @@ function relWord(dstr){ const a=new Date(dstr+'T00:00:00'),b=new Date(ymd(today)
    whichever is present so photos render both before and after cloud sync. */
 function mediaSrc(x){ return x ? (x.src || x.url || '') : ''; }
 function tileBg(m){ if(!m)return'background:#e8edf4'; const u=mediaSrc(m); if(u)return`background-image:url('${u}')`; if(m.grad)return`background:${m.grad}`; return'background:#e8edf4'; }
+
+/* Location lives in a single text field (keeps the existing DB schema) encoded as
+   "<name> @<lat>,<lng> @@url=<url>" — every part optional:
+     • name   — free text the user typed
+     • coords — captured from GPS ("current location")
+     • url    — a map link the user pasted manually
+   parseLocation() splits them back out and decides the clickable href:
+   a manual url wins, else the GPS coords, else a maps search of the name. */
+function mapsSearch(q){ return 'https://www.google.com/maps/search/?api=1&query='+encodeURIComponent(q); }
+function prettyUrl(u){ try{ const x=new URL(u); let s=x.hostname.replace(/^www\./,'')+x.pathname.replace(/\/$/,'');
+    return s.length>42?s.slice(0,40)+'…':s; }catch(e){ return u.length>42?u.slice(0,40)+'…':u; } }
+function parseLocation(loc){
+  if(!loc) return null;
+  loc = String(loc).trim(); if(!loc) return null;
+  let manualUrl='';
+  const ui = loc.indexOf('@@url=');
+  if(ui!==-1){ manualUrl = loc.slice(ui+6).trim(); loc = loc.slice(0,ui).trim(); }
+  let name=loc, coords='';
+  const m = loc.match(/^(.*?)\s*@\s*(-?\d+(?:\.\d+)?\s*,\s*-?\d+(?:\.\d+)?)\s*$/);
+  if(m){ name=m[1].trim(); coords=m[2].replace(/\s+/g,''); }
+  const href = manualUrl || (coords?mapsSearch(coords):(name?mapsSearch(name):''));
+  const label = name || coords || (manualUrl?prettyUrl(manualUrl):'');
+  return { name, coords, manualUrl, href, label };
+}
+function locationHTML(loc){
+  const p = parseLocation(loc); if(!p || !p.label) return '';
+  if(!p.href) return esc(p.label);
+  return `<a class="loclink" href="${esc(p.href)}" target="_blank" rel="noopener noreferrer">${esc(p.label)}</a>`;
+}
 function $(id){ return document.getElementById(id); }
 
 /* ===================== CLOUD (Supabase) ===================== */
@@ -1353,7 +1422,7 @@ function renderStorySlide(){
       <span class="storymood">${mood.emoji} ${mood.label}</span>
       <h2 class="storytitle">${esc(m.title)||'Untitled'}</h2>
       ${m.content?`<p class="storytext">${esc(m.content)}</p>`:''}
-      <div class="storymeta-row"><span>${fmtDateLong(m.date)}</span>${mediaCount}${m.location?`<span>· 📍 ${esc(m.location)}</span>`:''}</div>
+      <div class="storymeta-row"><span>${fmtDateLong(m.date)}</span>${mediaCount}${m.location?`<span>· 📍 ${esc((parseLocation(m.location)||{}).label||'')}</span>`:''}</div>
     </div>`;
 
   // animate the active progress segment
@@ -1602,7 +1671,55 @@ function renderDraftTags(){ const row=$('nmTagRow');
     row.insertBefore(el,input); }); }
 function addTag(v){ v=(v||'').trim(); if(v&&!draft.tags.includes(v)){ draft.tags.push(v); renderDraftTags(); } }
 function removeTag(t){ draft.tags=draft.tags.filter(x=>x!==t); renderDraftTags(); }
-function addLocation(){ const v=prompt('Location:',draft.location||''); if(v!==null){ draft.location=v.trim(); toast(v?'Location added':'Location cleared'); } }
+/* ----- location: name + optional current-GPS + optional pasted map URL ----- */
+let locDraft = { name:'', coords:'' };
+function addLocation(){
+  const p = parseLocation(draft.location);
+  locDraft = { name: p?p.name:'', coords: p?p.coords:'' };
+  $('locNameInput').value = locDraft.name;
+  $('locUrlInput').value = p?p.manualUrl:'';
+  $('locRemoveBtn').style.display = draft.location ? 'block' : 'none';
+  updateLocStat();
+  $('locModal').classList.add('open');
+  setTimeout(()=>$('locNameInput').focus(),200);
+}
+function closeLocModal(){ $('locModal').classList.remove('open'); }
+function updateLocStat(){ const s=$('locStat');
+  if(locDraft.coords){ s.className='locstat ok'; s.innerHTML=`📍 Current location attached · <b>${esc(locDraft.coords)}</b>`; }
+  else { s.className='locstat'; s.textContent='No GPS position attached yet.'; }
+}
+function captureGps(){
+  if(!navigator.geolocation){ toast('GPS not available on this device','err'); return; }
+  const btn=$('locGpsBtn'); const orig=btn.innerHTML;
+  btn.disabled=true; btn.innerHTML='<span class="spinner"></span>Getting your location…';
+  navigator.geolocation.getCurrentPosition(
+    pos=>{ const lat=pos.coords.latitude.toFixed(5), lng=pos.coords.longitude.toFixed(5);
+      locDraft.coords=`${lat},${lng}`; btn.disabled=false; btn.innerHTML=orig; updateLocStat(); toast('Location captured','ok'); },
+    err=>{ btn.disabled=false; btn.innerHTML=orig;
+      const msg = err.code===1 ? 'Permission denied — allow location access in your browser'
+                : err.code===3 ? 'Timed out getting your location — try again'
+                : 'Could not get your location';
+      toast(msg,'err'); },
+    { enableHighAccuracy:true, timeout:10000, maximumAge:0 }
+  );
+}
+function normalizeUrl(u){ u=u.trim(); if(!u) return '';
+  if(!/^https?:\/\//i.test(u)){ if(/\s/.test(u) || !u.includes('.')) return null; u='https://'+u; }
+  try{ new URL(u); return u; }catch(e){ return null; } }
+function saveLocation(){
+  const name=$('locNameInput').value.trim();
+  const rawUrl=$('locUrlInput').value.trim();
+  let url='';
+  if(rawUrl){ const n=normalizeUrl(rawUrl); if(n===null){ toast('That doesn\u2019t look like a valid link','err'); $('locUrlInput').focus(); return; } url=n; }
+  let loc = name || '';
+  if(locDraft.coords) loc = (loc?loc+' ':'') + '@'+locDraft.coords;
+  if(url) loc = (loc?loc+' ':'') + '@@url='+url;
+  draft.location=loc; closeLocModal();
+  toast(loc?'Location added':'Location cleared', loc?'ok':null);
+}
+function removeLocation(){ draft.location=''; locDraft={name:'',coords:''}; $('locNameInput').value=''; $('locUrlInput').value=''; closeLocModal(); toast('Location removed'); }
+$('locNameInput').addEventListener('keydown', e=>{ if(e.key==='Enter') saveLocation(); if(e.key==='Escape') closeLocModal(); });
+$('locUrlInput').addEventListener('keydown', e=>{ if(e.key==='Enter') saveLocation(); if(e.key==='Escape') closeLocModal(); });
 function addPeople(){ const v=prompt('People (comma separated):',(draft.people||[]).join(', ')); if(v!==null){ draft.people=v.split(',').map(s=>s.trim()).filter(Boolean); toast(draft.people.length+' added'); } }
 function updateRate(){ const v=+$('nmRate').value; $('nmRate').style.setProperty('--p',v+'%');
   const face=v>=85?'😄':v>=65?'🙂':v>=45?'😐':v>=25?'🙁':'😡'; $('nmRateFace').textContent=face; if(draft)draft.rating=v; }
@@ -1659,7 +1776,7 @@ function openDetail(id){ detailId=id; const m=memories.find(x=>x.id===id); if(!m
       <div class="det-text">${esc(m.content)}</div>
       ${m.media&&m.media.length?`<div class="det-sec"><div class="sh"><b>Media (${m.media.length})</b><span class="ch">›</span></div><div class="mediagrid">${mediaGrid}</div></div>`:''}
       ${tags?`<div class="det-sec"><div class="sh"><b>Tags</b></div><div class="dtags">${tags}</div></div>`:''}
-      ${m.location?`<div class="det-sec"><div class="sh"><b>Location</b></div><div class="loc"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 21s7-6 7-11a7 7 0 1 0-14 0c0 5 7 11 7 11Z" stroke-linejoin="round"/><circle cx="12" cy="10" r="2.4"/></svg>${esc(m.location)}</div></div>`:''}
+      ${m.location?`<div class="det-sec"><div class="sh"><b>Location</b></div><div class="loc"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 21s7-6 7-11a7 7 0 1 0-14 0c0 5 7 11 7 11Z" stroke-linejoin="round"/><circle cx="12" cy="10" r="2.4"/></svg>${locationHTML(m.location)}</div></div>`:''}
       ${m.people&&m.people.length?`<div class="det-sec"><div class="sh"><b>People</b></div><div class="dtags">${m.people.map(p=>`<span class="chip" style="background:var(--blue-soft);color:var(--blue)">${esc(p)}</span>`).join('')}</div></div>`:''}
       <div class="det-actions">
         <button class="${m.liked?'on':''}" onclick="toggleField('${m.id}','liked',this)"><svg width="24" height="24" viewBox="0 0 24 24" fill="${m.liked?'currentColor':'none'}" stroke="currentColor" stroke-width="2"><path d="M12 21s-7-4.6-9.5-9A5.4 5.4 0 0 1 12 6a5.4 5.4 0 0 1 9.5 6c-2.5 4.4-9.5 9-9.5 9Z" stroke-linejoin="round"/></svg></button>
