@@ -5156,7 +5156,19 @@
       const g = $('bgGrid');
       if (bgTabKind === 'grad') { g.innerHTML = BG_GRADIENTS.map(gr => `<div class="bgopt" style="background:${gr}" onclick="pickBackground('grad','${gr.replace(/'/g, "")}')"></div>`).join(''); }
       else if (bgTabKind === 'solid') { g.innerHTML = BG_SOLIDS.map(c => `<div class="bgopt" style="background:${c}" onclick="pickBackground('grad','${c}')"></div>`).join(''); }
-      else { g.innerHTML = CATEGORY_BG.map(c => `<div class="bgopt" style="background-image:url('${categoryUrl(c.key)}'),${BG_GRADIENTS[0]}" onclick="pickBackground('cat','${c.key}')"><span class="ce">${c.emoji}</span><span class="cl">${c.label}</span></div>`).join(''); }
+      else {g.innerHTML = CATEGORY_BG.map(c => `
+  <div class="bgopt"
+       style="background-image:url('${categoryUrl(c.key)}'),${BG_GRADIENTS[0]}">
+       
+    <span class="ce fallback">${c.emoji}</span>
+    <span class="cl">${c.label}</span>
+
+    <img src="${categoryUrl(c.key)}"
+         style="display:none"
+         onload="this.parentElement.querySelector('.fallback').style.display='none'"
+         onerror="this.parentElement.querySelector('.fallback').style.display='block'">
+  </div>
+`).join('');}
     }
     function pickBackground(kind, val) {
       if (kind === 'grad') { draft.media.push({ type: 'image', grad: val }); renderDraftMedia(); closeBgPicker(); toast('Background added', 'ok'); return; }
