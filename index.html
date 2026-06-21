@@ -5158,8 +5158,9 @@
       else if (bgTabKind === 'solid') { g.innerHTML = BG_SOLIDS.map(c => `<div class="bgopt" style="background:${c}" onclick="pickBackground('grad','${c}')"></div>`).join(''); }
       else {g.innerHTML = CATEGORY_BG.map(c => `
   <div class="bgopt"
-       style="background-image:url('${categoryUrl(c.key)}'),${BG_GRADIENTS[0]}">
-       
+       style="background-image:url('${categoryUrl(c.key)}'),${BG_GRADIENTS[0]}"
+       onclick="pickBackground('cat','${c.key}')">
+
     <span class="ce fallback">${c.emoji}</span>
     <span class="cl">${c.label}</span>
 
